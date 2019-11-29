@@ -9,6 +9,14 @@ enum AtemSize: UInt8 {
 	case oneME = 0, twoME = 1
 }
 
+extension Int16 {
+    var twoBytes : [UInt8] {
+        let unsignedSelf = UInt16(bitPattern: self)
+        return [UInt8(truncatingIfNeeded: unsignedSelf >> 8),
+                UInt8(truncatingIfNeeded: unsignedSelf)]
+    }
+}
+
 /// There are two version numbers in ATEM world: One for the ATEM Software Control application (for instance version 6.0) which is what people usually refers to and one for the firmware which is often updated with the PC/Mac application versions (for instance 2.15). The latter version number is what "_ver" gives you and a number you can not find anywhere in the application to our knowledge.
 public struct ProtocolVersion: Serializable {
 	public static let title = MessageTitle(string: "_ver")
@@ -154,6 +162,108 @@ struct DoCut: Message {
 	}
 }
 
+/// Informs a switcher that the shutter should be changed
+public struct ChangeShutter: Message {
+    public static let title = MessageTitle(string: "CCmd")
+
+    public let cameraNum: UInt8
+    public var adjustmentDomain: UInt8
+    public var feature: UInt8
+    public var focus: Bool
+    public var shutter: Int16 = 0
+    public var ifgwb: Int16 = 0
+
+    
+    public init(with bytes: ArraySlice<UInt8>) throws {
+        self.cameraNum = bytes[relative: 0]
+        self.adjustmentDomain = bytes[relative: 1]
+        self.feature = bytes[relative: 2]
+        self.focus = bytes[relative: 3] == 1
+        if adjustmentDomain == 0 {
+            if feature == 1 {
+
+            }
+                else {
+                    self.shutter = Int16(from: bytes[relative: 18..<20])
+                    self.ifgwb = Int16(from: bytes[relative: 16..<18])
+                }
+        }
+            else {
+                    self.shutter = Int16(from: bytes[relative: 18..<20])
+                    self.ifgwb = Int16(from: bytes[relative: 16..<18])
+            }
+        
+        //print(from: bytes[relative: 18..<20])
+        //print(shutter)
+    }
+    
+
+    //print(self.shutter.bytes)
+    public var debugDescription: String { return "Change shutter of camera\(cameraNum) to \(shutter)"}
+}
+
+/// Informs a controller that the shutter should be changed
+public struct ShutterChanged: Serializable {
+    public static let title = MessageTitle(string: "CCdP")
+
+     public let cameraNum: UInt8
+     public var adjustmentDomain: UInt8
+     public var feature: UInt8
+     public var focus: Bool
+
+     public var shutter: Int16 = 0
+     public var ifgwb: Int16 = 0
+     
+     public init(with bytes: ArraySlice<UInt8>) throws {
+         cameraNum = bytes[relative: 0]
+         adjustmentDomain  = bytes[relative: 1]
+         feature  = bytes[relative: 2]
+         focus  = bytes[relative: 3] == 1
+         if adjustmentDomain == 0 {
+             if feature == 1 {
+
+             }
+                 else {
+                     self.shutter = Int16(from: bytes[relative: 18..<20])
+                     self.ifgwb = Int16(from: bytes[relative: 16..<18])
+                 }
+         }
+             else {
+                     self.shutter = Int16(from: bytes[relative: 18..<20])
+                     self.ifgwb = Int16(from: bytes[relative: 16..<18])
+             }
+         
+        //print(shutter.bytes)
+        //print(shutter.byteSwapped)
+
+     }
+     
+    public init(to cameraNum: UInt8, newshutter: Int16, newifgwb: Int16, adjustmentDomain: UInt8, feature: UInt8, newfocus: Bool? = nil) {
+        self.cameraNum = cameraNum
+        self.shutter = newshutter
+        self.adjustmentDomain = adjustmentDomain
+        self.feature = feature
+        self.ifgwb = newifgwb
+        self.focus = newfocus!
+
+        //print(shutter.bytes)
+        //print(shutter.byteSwapped)
+
+     }
+     
+     public var dataBytes: [UInt8] {
+        return [cameraNum, adjustmentDomain, feature, focus ? 1:0 ,0,0,0,0,0,0,0,0,0,0,0,0] + ifgwb.twoBytes + shutter.twoBytes + [0,0,0,0]
+        //return  [1, 1, 5, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 21, 52, 0, 0, 0, 0]
+        //print(shutter.bytes)
+        //print(shutter.byteSwapped)
+        //return [cameraNum, 1, 5, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 156, 64, 0, 0, 0, 0]
+     }
+
+    public var debugDescription: String {return "Shutter has changed to \(shutter) on camera\(cameraNum)"}
+}
+
+
+
 /// Informs a switcher that the preview bus should be changed
 public struct ChangePreviewBus: Message {
 	public static let title = MessageTitle(string: "CPvI")
@@ -270,7 +380,7 @@ public struct ChangeTransitionPosition: Serializable {
 	}
 	
 	public var dataBytes: [UInt8] {
-		return [mixEffect, 0] + position.bytes
+        return [mixEffect, 0] + position.bytes
 	}
 	
 	public var debugDescription: String { return "Change transition position of ME\(mixEffect+1) to \(position)"}
@@ -465,7 +575,7 @@ public struct InitiationComplete: Message {
 	public static var title = MessageTitle(string: "InCm")
 	
 	public init(with bytes: ArraySlice<UInt8>) throws {
-		print("InCm", bytes)
+		//print("InCm", bytes)
 	}
 	
 	public let debugDescription = "Initiation complete"

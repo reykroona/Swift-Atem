@@ -4,6 +4,9 @@ import Foundation
 let random = arc4random
 #endif
 
+#if os(iOS)
+let random = arc4random
+#endif
 
 /// Stores all relevant information to keep an ATEM connection alive.
 /// Use this store to interprete incoming packets and construct new outgoing packets.
