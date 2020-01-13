@@ -5,7 +5,7 @@
 //  Created by Damiaan on 26/05/18.
 //
 
-enum AtemSize: UInt8 {
+public enum AtemSize: UInt8 {
 	case oneME = 0, twoME = 1
 }
 
@@ -46,7 +46,7 @@ struct AtemType: Serializable {
 	
 	init(with bytes: ArraySlice<UInt8>) throws {
 		// Stores the string constructed from the first non-zero bytes
-		if let string = String(bytes: bytes.prefix(upTo: bytes.index {$0==0} ?? 44), encoding: .utf8) {
+		if let string = String(bytes: bytes.prefix(upTo: bytes.firstIndex {$0==0} ?? 44), encoding: .utf8) {
 			self.string = string
 		} else {
 			throw MessageError.titleNotDeserializable
@@ -135,7 +135,7 @@ public struct Topology: Serializable {
 			"digitalVideoEffects": digitalVideoEffects,
 			"superSources": superSources,
 			"standardDefinitionOutput": standardDefinitionOutput
-			] as DictionaryLiteral ).map{"\t\($0): \($1),"}.joined(separator: "\n") + "\n)"
+			] as KeyValuePairs ).map{"\t\($0): \($1),"}.joined(separator: "\n") + "\n)"
 	}
 	
 }
@@ -152,13 +152,21 @@ struct ConnectionInitiationEnd: Serializable {
 }
 
 /// Performs a cut on the atem
-struct DoCut: Message {
-	static let title = MessageTitle(string: "DCut")
-	let debugDescription = "cut"
-	let atemSize : AtemSize
+public struct DoCut: Serializable {
+	public static let title = MessageTitle(string: "DCut")
+	public let debugDescription = "cut"
+	public let atemSize: AtemSize
 	
-	init(with bytes: ArraySlice<UInt8>) {
+	public init(with bytes: ArraySlice<UInt8>) {
 		atemSize = AtemSize(rawValue: bytes.first!)!
+	}
+    
+	public init(in atemSize: AtemSize) {
+		self.atemSize = atemSize
+	}
+
+	public var dataBytes: [UInt8] {
+		return [atemSize.rawValue] + [0,0,0]
 	}
 }
 
@@ -265,7 +273,7 @@ public struct ShutterChanged: Serializable {
 
 
 /// Informs a switcher that the preview bus should be changed
-public struct ChangePreviewBus: Message {
+public struct ChangePreviewBus: Serializable {
 	public static let title = MessageTitle(string: "CPvI")
 
 	public let mixEffect: UInt8
@@ -276,12 +284,21 @@ public struct ChangePreviewBus: Message {
 		let sourceNumber = UInt16(from: bytes[relative: 2..<4])
 		self.previewBus = try VideoSource.decode(from: sourceNumber)
 	}
-	
+    
+	public init(to newPreviewBus: VideoSource, mixEffect: UInt8 = 0) {
+		self.mixEffect = mixEffect
+		previewBus = newPreviewBus
+	}
+
+	public var dataBytes: [UInt8] {
+	return [mixEffect, 0] + previewBus.rawValue.bytes
+    }
+    
 	public var debugDescription: String {return "Change preview bus to \(previewBus)"}
 }
 
 /// Informs a switcher that the program bus shoud be changed
-public struct ChangeProgramBus: Message {
+public struct ChangeProgramBus: Serializable {
 	public static let title = MessageTitle(string: "CPgI")
 
 	public let mixEffect: UInt8
@@ -292,8 +309,79 @@ public struct ChangeProgramBus: Message {
 		let sourceNumber = UInt16(from: bytes[relative: 2..<4])
 		self.programBus = try VideoSource.decode(from: sourceNumber)
 	}
+    
+	public init(to newProgramBus: VideoSource, mixEffect: UInt8 = 0) {
+		self.mixEffect = mixEffect
+		programBus = newProgramBus
+	}
+
+	public var dataBytes: [UInt8] {
+		return [mixEffect, 0] + programBus.rawValue.bytes
+	}
 	
 	public var debugDescription: String {return "Change program bus to \(programBus)"}
+}
+
+/// Informs a switcher that a source should be assigned to the specified auxiliary output
+public struct ChangeAuxiliaryOutput: Serializable {
+	public static let title = MessageTitle(string: "CAuS")
+
+	/// The source that should be assigned to the auxiliary output
+	public let source: VideoSource
+	/// The auxiliary output that should be rerouted
+	public let output: UInt8
+
+	public init(with bytes: ArraySlice<UInt8>) throws {
+		output = bytes[relative: 1]
+		let sourceNumber = UInt16(from: bytes[relative: 2..<4])
+		self.source = try VideoSource.decode(from: sourceNumber)
+	}
+
+	/// Create a message to reroute an auxiliary output.
+	/// - Parameters:
+	///   - output: The source that should be assigned to the auxiliary output
+	///   - newSource: The auxiliary output that should be rerouted
+	public init(_ output: UInt8, to newSource: VideoSource) {
+		self.source = newSource
+		self.output = output
+	}
+
+	public var dataBytes: [UInt8] {
+		return [1, output] + source.rawValue.bytes
+	}
+
+	public var debugDescription: String {return "Change Aux \(output) source to source \(source)"}
+}
+
+/// Informs a controller that a source has been routed to an auxiliary output
+public struct AuxiliaryOutputChanged: Serializable {
+    public static let title = MessageTitle(string: "AuxS")
+    
+	/// The source that has been routed to the auxiliary output
+    public let source: VideoSource
+	/// The auxiliary output that has received another route
+    public let output: UInt8
+
+    public init(with bytes: ArraySlice<UInt8>) throws {
+        output = bytes[relative: 0]
+        let sourceNumber = UInt16(from: bytes[relative: 2..<4])
+        self.source = try VideoSource.decode(from: sourceNumber)
+    }
+    
+	/// Create a message to inform that a source has been routed to an auxiliary output
+	/// - Parameters:
+	///   - source: The source that has been assigned to the auxiliary output
+	///   - output: The auxiliary output that has been rerouted
+    public init(source newSource: VideoSource, output newOutput: UInt8) {
+        source = newSource
+        output = newOutput
+    }
+    
+    public var dataBytes: [UInt8] {
+        return [output, 0] + source.rawValue.bytes
+    }
+    
+    public var debugDescription: String {return "Aux \(output) source changed to source \(source)"}
 }
 
 /// Informs a controller that the preview bus has changed
@@ -511,25 +599,25 @@ extension VideoSource {
 			
 			let shortName = optionalShortName ?? String(longName.prefix(4))
 			let encodedShortName = try encodeAtem(string: shortName, length: PropertiesChanged.shortNameLength)
-			
-			
-			dataBytes =
-				source.rawValue.bytes +
-				encodedLongName +
-				encodedShortName +
-				[
-					0x01,
-					externalInterfaces.rawValue,
-					0x01
-				] +
-				kind.rawValue.bytes +
-				[
-					0x00,
-					availability.rawValue,
-					mixEffects.rawValue,
-					0x1f,
-					0x03
-				]
+
+			var temp = source.rawValue.bytes
+			temp += encodedLongName
+			temp += encodedShortName
+			temp += [
+				0x01,
+				externalInterfaces.rawValue,
+				0x01
+			]
+			temp += kind.rawValue.bytes
+			temp += [
+				0x00,
+				availability.rawValue,
+				mixEffects.rawValue,
+				0x1f,
+				0x03
+			]
+
+			dataBytes = temp
 		}
 		
 		public var debugDescription: String {
